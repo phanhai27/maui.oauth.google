@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="OAuthSample.MainPage"
+             Loaded="ContentPage_Loaded">
+    <ScrollView>
+        <VerticalStackLayout Padding="30,0" Spacing="25">
+            <Button
+                x:Name="SignInButton"
+                Text="Sign In" 
+                Clicked="SignIn_Clicked"
+                HorizontalOptions="Fill" />
+            <Button
+                x:Name="ListButton"
+                Text="List"
+                Clicked="List_Clicked"
+                HorizontalOptions="Fill"
+                IsVisible="False" />
+            <Label x:Name="ListLabel" />
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>
