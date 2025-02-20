@@ -7,6 +7,7 @@ using Newtonsoft.Json;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -30,10 +31,12 @@ public class GoogleDriveService
     readonly string _windowsClientId = "__UWP_CLIENT_ID_HERE__";      // UWP client
     readonly string _androidClientId = "__ANDROID_CLIENT_ID_HERE__";  // Android client
     readonly string _androidRedirectScheme = AppInfo.Current.PackageName;
+    readonly static string _fastApiAuthUrl = "https://your/api/auth/google";
+    readonly string _fastApiUserInfohUrl = "https://your/api/user/info";
 
     Oauth2Service? _oauth2Service;
     DriveService? _driveService;
-    GoogleCredential? _credential;
+    string? _credential;
     string? _email;
 
     public bool IsSignedIn => _credential != null;
@@ -77,20 +80,21 @@ public class GoogleDriveService
             }
         }
 
-        var accesToken = await SecureStorage.GetAsync("access_token");
-        _credential = GoogleCredential.FromAccessToken(accesToken);
-        _oauth2Service = new Oauth2Service(new BaseClientService.Initializer
+        var accessToken = await SecureStorage.GetAsync("access_token");
+        Console.WriteLine($"Access token: {accessToken}");
+        
+        using (var client = new HttpClient())
         {
-            HttpClientInitializer = _credential,
-            ApplicationName = AppInfo.Current.Name
-        });
-        _driveService = new DriveService(new BaseClientService.Initializer
-        {
-            HttpClientInitializer = _credential,
-            ApplicationName = AppInfo.Current.Name
-        });
-        var userInfo = await _oauth2Service.Userinfo.Get().ExecuteAsync();
-        _email = userInfo.Email;
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+            var response = await client.GetAsync($"{_fastApiUserInfohUrl}");
+            var responseBody = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode) throw new Exception($"Error requesting user info: {responseBody}");
+
+            var userInfo = JsonObject.Parse(responseBody);
+            _email = userInfo!["email"]!.ToString();
+            _credential = "credential";
+        }
     }
 
     public async Task<string> ListFiles()
@@ -205,8 +209,6 @@ public class GoogleDriveService
 
     private static async Task AuthenticateWithFastAPI(string googleAccessToken)
     {
-        string _fastApiAuthUrl = "https://your/paht/api/auth/google_exchange";
-
         using var httpClient = new HttpClient();
 
         var payload = new { access_token = googleAccessToken };
