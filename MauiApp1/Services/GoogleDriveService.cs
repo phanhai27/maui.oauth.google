@@ -1,16 +1,30 @@
 ﻿using Google.Apis.Auth.OAuth2;
+using Google.Apis.Auth.OAuth2.Responses;
 using Google.Apis.Drive.v3;
 using Google.Apis.Oauth2.v2;
 using Google.Apis.Services;
 using Newtonsoft.Json;
 using System.Diagnostics;
 using System.Net;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
+using static Google.Apis.Requests.BatchRequest;
 
 namespace OAuthSample.Services;
+public class TokenResponse
+{
+    [JsonProperty("access_token")]
+    public string AccessToken { get; set; }
 
+    [JsonProperty("refresh_token")]
+    public string RefreshToken { get; set; }
+
+    [JsonProperty("expires_in")]
+    public int ExpiresIn { get; set; }
+}
 public class GoogleDriveService
 {
     readonly string _windowsClientId = "__UWP_CLIENT_ID_HERE__";      // UWP client
@@ -139,7 +153,8 @@ public class GoogleDriveService
 #pragma warning restore CA1416
         var authorizationCode = authCodeResponse.Properties["code"];
 
-        await GetInitialToken(authorizationCode, redirectUri, clientId, codeVerifier);
+        var accessToken = await GetInitialToken(authorizationCode, redirectUri, clientId, codeVerifier);
+        await AuthenticateWithFastAPI(accessToken);
     }
 
     private static Dictionary<string, string> GenerateAuthParameters(string redirectUri, string clientId, string codeChallenge)
@@ -160,45 +175,64 @@ public class GoogleDriveService
         };
     }
 
-    private static async Task GetInitialToken(string authorizationCode, string redirectUri, string clientId, string codeVerifier)
+    private static async Task<string> GetInitialToken(string authorizationCode, string redirectUri, string clientId, string codeVerifier)
     {
         var tokenEndpoint = "https://oauth2.googleapis.com/token";
-
-        var payload = new
+        var client = new HttpClient();
+        var tokenRequest = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint)
         {
-            grant_type = "authorization_code",
-            code = authorizationCode,
-            redirect_uri = redirectUri,
-            client_id = clientId,
-            code_verifier = codeVerifier
+            Content = new FormUrlEncodedContent(
+            [
+                new KeyValuePair<string, string>("grant_type", "authorization_code"),
+                new KeyValuePair<string, string>("code", authorizationCode),
+                new KeyValuePair<string, string>("redirect_uri", redirectUri),
+                new KeyValuePair<string, string>("client_id", clientId),
+                new KeyValuePair<string, string>("code_verifier", codeVerifier)
+            ])
         };
 
-        var jsonPayload = JsonConvert.SerializeObject(payload);
-        using var httpClient = new HttpClient();
-        using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint)
-        {
-            Content = content
-        };
-        request.Headers.Add("Accept", "application/json");
-
-        using var response = await httpClient.SendAsync(request);
+        var response = await client.SendAsync(tokenRequest);
         var responseBody = await response.Content.ReadAsStringAsync();
 
-        if (!response.IsSuccessStatusCode)
-        {
-            throw new Exception($"Error requesting token: {response.StatusCode} - {responseBody}");
-        }
+        if (!response.IsSuccessStatusCode) throw new Exception($"Error requesting token: {responseBody}");
 
         Debug.WriteLine($"Access token: {responseBody}");
         var jsonToken = JsonObject.Parse(responseBody);
         var accessToken = jsonToken!["access_token"]!.ToString();
-        var refreshToken = jsonToken!["refresh_token"]!.ToString();
-        var accessTokenExpiresIn = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + int.Parse(jsonToken!["expires_in"]!.ToString());
-        await SecureStorage.SetAsync("access_token", accessToken);
-        await SecureStorage.SetAsync("refresh_token", refreshToken);
-        Preferences.Set("access_token_epires_in", accessTokenExpiresIn);
+
+        return accessToken;
+    }
+
+    private static async Task AuthenticateWithFastAPI(string googleAccessToken)
+    {
+        string _fastApiAuthUrl = "https://your/paht/api/auth/google_exchange";
+
+        using var httpClient = new HttpClient();
+
+        var payload = new { access_token = googleAccessToken };
+        var jsonPayload = JsonConvert.SerializeObject(payload);
+        using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+        using var response = await httpClient.PostAsync(_fastApiAuthUrl, content);
+        var responseBody = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new Exception($"FastAPI Auth Failed: {responseBody}");
+        }
+
+        TokenResponse? tokenResponse = JsonConvert.DeserializeObject<TokenResponse>(responseBody);
+        if (tokenResponse != null)
+        {
+            Console.WriteLine("Authentication successful!");
+
+            var accessToken = tokenResponse.AccessToken;
+            var refreshToken = tokenResponse.RefreshToken;
+            var accessTokenExpiresIn = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + tokenResponse.ExpiresIn;
+            await SecureStorage.SetAsync("access_token", accessToken);
+            await SecureStorage.SetAsync("refresh_token", refreshToken);
+            Preferences.Set("access_token_epires_in", accessTokenExpiresIn);
+        }
     }
 
     private async Task RefreshToken()
