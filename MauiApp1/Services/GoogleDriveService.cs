@@ -2,6 +2,7 @@
 using Google.Apis.Drive.v3;
 using Google.Apis.Oauth2.v2;
 using Google.Apis.Services;
+using Newtonsoft.Json;
 using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
@@ -146,7 +147,7 @@ public class GoogleDriveService
         return new Dictionary<string, string>
         {
             //{ "scope", "https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata" },
-            { "scope", string.Join(' ', [Oauth2Service.Scope.UserinfoProfile, Oauth2Service.Scope.UserinfoEmail, DriveService.Scope.Drive, DriveService.Scope.DriveFile, DriveService.Scope.DriveAppdata]) },
+            { "scope", string.Join(' ', [Oauth2Service.Scope.UserinfoProfile, Oauth2Service.Scope.UserinfoEmail]) },
             { "access_type", "offline" },
             { "include_granted_scopes", "true" },
             { "response_type", "code" },
@@ -162,23 +163,33 @@ public class GoogleDriveService
     private static async Task GetInitialToken(string authorizationCode, string redirectUri, string clientId, string codeVerifier)
     {
         var tokenEndpoint = "https://oauth2.googleapis.com/token";
-        var client = new HttpClient();
-        var tokenRequest = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint)
+
+        var payload = new
         {
-            Content = new FormUrlEncodedContent(
-            [
-                new KeyValuePair<string, string>("grant_type", "authorization_code"),
-                new KeyValuePair<string, string>("code", authorizationCode),
-                new KeyValuePair<string, string>("redirect_uri", redirectUri),
-                new KeyValuePair<string, string>("client_id", clientId),
-                new KeyValuePair<string, string>("code_verifier", codeVerifier)
-            ])
+            grant_type = "authorization_code",
+            code = authorizationCode,
+            redirect_uri = redirectUri,
+            client_id = clientId,
+            code_verifier = codeVerifier
         };
 
-        var response = await client.SendAsync(tokenRequest);
+        var jsonPayload = JsonConvert.SerializeObject(payload);
+        using var httpClient = new HttpClient();
+        using var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint)
+        {
+            Content = content
+        };
+        request.Headers.Add("Accept", "application/json");
+
+        using var response = await httpClient.SendAsync(request);
         var responseBody = await response.Content.ReadAsStringAsync();
 
-        if (!response.IsSuccessStatusCode) throw new Exception($"Error requesting token: {responseBody}");
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new Exception($"Error requesting token: {response.StatusCode} - {responseBody}");
+        }
 
         Debug.WriteLine($"Access token: {responseBody}");
         var jsonToken = JsonObject.Parse(responseBody);
