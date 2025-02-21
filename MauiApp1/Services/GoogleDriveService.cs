@@ -204,6 +204,8 @@ public class GoogleDriveService
         var jsonToken = JsonObject.Parse(responseBody);
         var accessToken = jsonToken!["access_token"]!.ToString();
 
+        await SecureStorage.SetAsync("gg_access_token", accessToken);
+
         return accessToken;
     }
 
@@ -270,7 +272,7 @@ public class GoogleDriveService
     private async Task RevokeTokens()
     {
         var revokeEndpoint = "https://oauth2.googleapis.com/revoke";
-        var access_token = await SecureStorage.GetAsync("access_token");
+        var access_token = await SecureStorage.GetAsync("gg_access_token");
         var client = new HttpClient();
         var tokenRequest = new HttpRequestMessage(HttpMethod.Post, revokeEndpoint)
         {
@@ -287,6 +289,8 @@ public class GoogleDriveService
         if (!response.IsSuccessStatusCode) throw new Exception($"Error revoking token: {responseBody}");
 
         Debug.WriteLine($"Revoke token: {responseBody}");
+        SecureStorage.Remove("gg_access_token");
+
         SecureStorage.Remove("access_token");
         SecureStorage.Remove("refresh_token");
         Preferences.Remove("access_token_epires_in");
